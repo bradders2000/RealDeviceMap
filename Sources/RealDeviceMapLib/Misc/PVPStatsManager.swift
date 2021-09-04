@@ -17,6 +17,8 @@ public class PVPStatsManager {
     public static let global = PVPStatsManager()
 
     private var stats = [PokemonWithFormAndGender: Stats]()
+    private let rankingLittleLock = Threading.Lock()
+    private var rankingLittle = [PokemonWithFormAndGender: ResponsesOrEvent]()
     private let rankingGreatLock = Threading.Lock()
     private var rankingGreat = [PokemonWithFormAndGender: ResponsesOrEvent]()
     private let rankingUltraLock = Threading.Lock()
@@ -109,11 +111,14 @@ public class PVPStatsManager {
                 stats[.init(pokemon: pokemon, form: form)] = stat
             }
         }
+        rankingLittleLock.lock()
         rankingGreatLock.lock()
         rankingUltraLock.lock()
         self.stats = stats
+        self.rankingLittle = [:]
         self.rankingGreat = [:]
         self.rankingUltra = [:]
+        rankingLittleLock.unlock()
         rankingGreatLock.unlock()
         rankingUltraLock.unlock()
         Log.debug(message: "[PVPStatsManager] Done parsing game master file")
@@ -194,6 +199,10 @@ public class PVPStatsManager {
         let info = PokemonWithFormAndGender(pokemon: pokemon, form: form)
         let cached: ResponsesOrEvent?
         switch league {
+        case .little:
+            rankingLittleLock.lock()
+            cached = rankingLittle[info]
+            rankingLittleLock.unlock()
         case .great:
             rankingGreatLock.lock()
             cached = rankingGreat[info]
@@ -206,6 +215,8 @@ public class PVPStatsManager {
 
         if cached == nil {
             switch league {
+            case .little:
+                rankingLittleLock.lock()
             case .great:
                 rankingGreatLock.lock()
             case .ultra:
@@ -213,6 +224,8 @@ public class PVPStatsManager {
             }
             guard let stats = stats[info] else {
                 switch league {
+                case .little:
+                    rankingLittleLock.unlock()
                 case .great:
                     rankingGreatLock.unlock()
                 case .ultra:
@@ -222,6 +235,9 @@ public class PVPStatsManager {
             }
             let event = Threading.Event()
             switch league {
+            case .little:
+                rankingLittle[info] = .event(event: event)
+                rankingLittleLock.unlock()
             case .great:
                 rankingGreat[info] = .event(event: event)
                 rankingGreatLock.unlock()
@@ -231,6 +247,10 @@ public class PVPStatsManager {
             }
             let values = getPVPValuesOrdered(stats: stats, cap: league.rawValue)
             switch league {
+            case .little:
+                rankingLittleLock.lock()
+                rankingLittle[info] = .responses(responses: values)
+                rankingLittleLock.unlock()
             case .great:
                 rankingGreatLock.lock()
                 rankingGreat[info] = .responses(responses: values)
@@ -380,6 +400,7 @@ extension PVPStatsManager {
     }
 
     enum League: Int {
+        case little = 500
         case great = 1500
         case ultra = 2500
     }
